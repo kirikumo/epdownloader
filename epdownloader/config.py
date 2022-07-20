@@ -1,17 +1,3 @@
-import os
-
-SUBSCRIPTION_URL_LIST = [
-    'https://newsofcar.net/running-man/',
-    'https://newsofcar.net/what-playing/',
-    'https://newsofcar.net/house-and-master/',
-]
-HIGH_QUALITY_HOST = [
-    'vip.lz-cdn11.com',
-    'dy2.yle888.vip',
-    'c2.monidai.com',
-]
-LIMIT_GET_PAGE_VIDEO = 20
-
 USER_AGENTS = [
     'Mozilla/5.0 (Windows; U; Windows NT 5.1; it; rv:1.8.1.11) '
     'Gecko/20071127 Firefox/2.0.0.11', 'Opera/9.25 (Windows NT 5.1; U; en)',
@@ -32,4 +18,3 @@ USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:85.0)'
     ' Gecko/20100101 Firefox/85.0'
 ]
-HIS_FILE_PATH = os.path.join(os.path.dirname(__file__), 'vedio_his.json')

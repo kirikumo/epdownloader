@@ -1,0 +1,6 @@
+requests>=2.25.1
+aiohttp>=3.8.1
+wells>=1.5.0
+winotify>=1.1.0
+selenium>=4.3.0
+git+ssh://git@github.com/kirikumo/aiom3u8downloader.git@058d8eb6c9ca3dfe95ab03d8f81c2a2a14e182e0#egg=aiom3u8downloader
