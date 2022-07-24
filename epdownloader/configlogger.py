@@ -21,7 +21,7 @@ class CustomFormatter(logging.Formatter):
 
 
 def setup_logger(filePath=None, level=logging.INFO):
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger('epdownloader')
     logger.setLevel(level)
     logFormat = CustomFormatter()
     # sh = logging.StreamHandler()

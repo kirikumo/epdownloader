@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import multiprocessing
 import os
 import random
@@ -176,19 +177,20 @@ class WebPageTools:
 class EPDownloader(WebPageTools):
 
     def __init__(
-        self,
-        outputdir,
-        tempdir,
-        log_path,
-        config_path,
-        limit_conn=100,
-        poolsize=multiprocessing.cpu_count() - 1,
+            self,
+            outputdir,
+            tempdir,
+            log_path,
+            config_path,
+            limit_conn=100,
+            poolsize=multiprocessing.cpu_count() - 1,
+            logger: logging.Logger = logging.getLogger(),
     ):
         self.outputdir = outputdir
         self.tempdir = tempdir
         self.log_path = log_path
         self.poolsize = poolsize
-        self.logger = setup_logger(log_path)
+        self.logger = logger
         self.limit_conn = limit_conn
 
         with open(config_path, encoding='utf-8') as f:
@@ -415,7 +417,7 @@ class EPDownloader(WebPageTools):
             json.dump(self.cache_info, f, indent=2, ensure_ascii=False)
 
     def run(self):
-        self.logger.info('---------------------- START ----------------------')
+        # self.logger.info('---------------------- START ----------------------')
 
         options = webdriver.ChromeOptions()
         options.add_argument('--headless')
@@ -436,12 +438,18 @@ class EPDownloader(WebPageTools):
             self.logger.info(
                 '===================================================')
         browser.quit()
-        self.logger.info('----------------------- END -----------------------')
+        # self.logger.info('----------------------- END -----------------------')
 
 
-def _run(log_path, tempdir, outputdir, concurrency, limit_conn, config_path):
-    logger = setup_logger(log_path)
-
+def _run(
+    log_path,
+    tempdir,
+    outputdir,
+    concurrency,
+    limit_conn,
+    config_path,
+    logger: logging.Logger,
+):
     start = time.time()
     epDownloader = EPDownloader(
         outputdir=outputdir,
@@ -450,6 +458,7 @@ def _run(log_path, tempdir, outputdir, concurrency, limit_conn, config_path):
         config_path=config_path,
         limit_conn=limit_conn,
         poolsize=concurrency,
+        logger=logger,
     )
     # notifyHook = NotifyHook(app_name='epdownloader')
     try:
@@ -493,20 +502,22 @@ def main(args):
     #     raise FileExistsError
 
     loc_file_path = os.path.join(gettempdir(), 'epdownloader')
+    logger = setup_logger(log_path)
     if os.path.exists(loc_file_path):
-        logger = setup_logger(log_path)
         logger.info('Protected program is running')
         logger.info('Program exit')
         return
 
+    logger.info('---------------------- START ----------------------')
     if programlock:
         with NamedTemporaryFile() as tf:
             os.rename(tf.name, loc_file_path)
             _run(log_path, tempdir, outputdir, concurrency, limit_conn,
-                 config_path)
+                 config_path, logger)
     else:
         _run(log_path, tempdir, outputdir, concurrency, limit_conn,
-             config_path)
+             config_path, logger)
+    logger.info('----------------------- END -----------------------')
 
 
 if __name__ == '__main__':
