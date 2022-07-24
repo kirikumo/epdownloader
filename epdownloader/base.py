@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from config import USER_AGENTS
 
 
-class WebPageTools:
+class WebTools:
 
     def randomUserAgent(self):
         limit_size = len(USER_AGENTS) - 1

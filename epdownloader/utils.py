@@ -2,7 +2,8 @@ import logging
 import os
 import threading
 
-from winotify import Notification
+from winotify import Notification, audio
+from aiom3u8downloader.aiodownloadm3u8 import load_logger_config
 
 
 class Log:
@@ -16,10 +17,9 @@ class Log:
         logger.handlers = []
         logger.setLevel(level)
 
-        sh = logging.StreamHandler()
-        sh.setFormatter(
-            logging.Formatter('[%(asctime)s: %(levelname)s] %(message)s'))
-        logger.addHandler(sh)
+        # init aiodownloadm3u8 logger
+        logging.captureWarnings(True)
+        load_logger_config()
 
         if filePath is not None:
             os.makedirs(os.path.dirname(filePath), exist_ok=True)
@@ -63,6 +63,7 @@ class Toast:
             duration=duration,
             launch=link,
         )
+        toast.set_audio(audio.Default, loop=False)
 
         button_list = [
             (button1_name, button1_link),
