@@ -1,190 +1,33 @@
 import argparse
 import json
-import logging
-import multiprocessing
 import os
-import random
 import re
-import signal
-import sys
-import threading
 import time
 import traceback
 from datetime import datetime as dat
 from pathlib import Path
 from tempfile import NamedTemporaryFile, gettempdir
-from urllib.request import Request, urlopen
 
 from aiom3u8downloader.aiodownloadm3u8 import AioM3u8Downloader
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.common.exceptions import JavascriptException
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
-from tool.epdownloader.epdownloader.configlogger import setup_logger
-from winotify import Notification
-
-from config import USER_AGENTS
-
-POP_NOTIFICATION = False
-
-parser = argparse.ArgumentParser(
-    prog='epdownloader',
-    description="download latest or missing episodes",
-)
-
-parser.add_argument(
-    '--outputdir',
-    '-od',
-    required=True,
-    help='output directory, e.g. ~/Downloads/',
-)
-parser.add_argument(
-    '--tempdir',
-    required=True,
-    help='temp dir, used to store .ts files before combing them into mp4',
-)
-parser.add_argument(
-    '--config_path',
-    required=True,
-    help='custom config file path, e.g. ~/config.json',
-)
-parser.add_argument(
-    '--concurrency',
-    '-c',
-    metavar='N',
-    type=int,
-    default=multiprocessing.cpu_count() - 1,
-    help='number of save ts file at a time',
-)
-parser.add_argument(
-    '--limit_conn',
-    '-conn',
-    type=int,
-    default=100,
-    help='limit amount of simultaneously opened connections',
-)
-parser.add_argument(
-    '--programlock',
-    '-lock',
-    action='store_true',
-    help=
-    "set to ensure that it can't be called again until the program is done",
-)
-parser.add_argument(
-    '--pop_notification',
-    '-pop',
-    action='store_true',
-    help=
-    "set to allow pop notifications (only support Windows 10 with PowerShell)",
-)
-
-
-def pop_notification(
-    app_id,
-    title,
-    link='',
-    msg='',
-    icon=os.path.join(os.path.dirname(__file__), 'notification.ico'),
-    duration: str = 'short',  # short/long
-    button1_name=None,
-    button1_link=None,
-    button2_name=None,
-    button2_link=None,
-):
-    if not POP_NOTIFICATION: return
-    toast = Notification(
-        app_id=app_id,
-        title=title,
-        msg=msg,
-        icon=icon,
-        duration=duration,
-        launch=link,
-    )
-
-    button_list = [
-        (button1_name, button1_link),
-        (button2_name, button2_link),
-    ]
-    for name, link in button_list:
-        if not name:
-            continue
-        toast.add_actions(
-            label=name,
-            launch=link,
-        )
-
-    toast.add_actions(label='知道')
-    thread = threading.Thread(target=toast.show())
-    thread.start()
-    thread.join()
-
-
-def signal_handler(sig, frame):
-    sys.exit(0)
-
-
-class VideoData:
-
-    def __init__(self, title, index, resolution, m3u8url):
-        self.title = title
-        self.index = index
-        w, h = resolution.split('x')
-        self.w = int(w)
-        self.h = int(h)
-        self.m3u8url = m3u8url
-
-    def __gt__(self, other):
-        return self.w * self.h > other.w * other.h
-
-    def __str__(self):
-        return json.dumps(
-            {
-                'title': self.title,
-                'index': self.index,
-                'm3u8url': self.m3u8url,
-            },
-            indent=2,
-        )
-
-
-class WebPageTools:
-
-    def randomUserAgent(self):
-        limit_size = len(USER_AGENTS) - 1
-        randomint = random.randint(0, limit_size)
-
-        headers = {'User-Agent': USER_AGENTS[randomint]}
-
-        return headers
-
-    def _getReqObj(self, url):
-        ua = self.randomUserAgent()
-        request = Request(url, headers=ua)
-        return request
-
-    def getHtmlStr(self, url):
-        req_obj = self._getReqObj(url)
-        html_str = urlopen(req_obj).read().decode()
-        return html_str
-
-    def getBsFromUrl(self, url):
-        html_str = self.getHtmlStr(url)
-        beautifulSoup = BeautifulSoup(html_str, 'html.parser')
-        return beautifulSoup
+from selenium.webdriver.common.by import By
+from tool.epdownloader.epdownloader.base import VideoData, WebPageTools
+from tool.epdownloader.epdownloader.utils import Log, Toast
 
 
 class EPDownloader(WebPageTools):
 
     def __init__(
-            self,
-            outputdir,
-            tempdir,
-            log_path,
-            config_path,
-            limit_conn=100,
-            poolsize=multiprocessing.cpu_count() - 1,
-            logger: logging.Logger = logging.getLogger(),
+        self,
+        outputdir,
+        tempdir,
+        log_path,
+        config_path,
+        logger,
+        limit_conn=100,
+        poolsize=7,
     ):
         self.outputdir = outputdir
         self.tempdir = tempdir
@@ -392,7 +235,7 @@ class EPDownloader(WebPageTools):
                     button1_link=self.log_path,
                 )
             try:
-                pop_notification(**noti_kwargs)
+                Toast.pop(**noti_kwargs)
             except Exception as e:
                 self.logger.warning('Send notification failed')
                 self.logger.warning(traceback.format_exc())
@@ -448,7 +291,7 @@ def _run(
     concurrency,
     limit_conn,
     config_path,
-    logger: logging.Logger,
+    logger: Log.LOGGER,
 ):
     start = time.time()
     epDownloader = EPDownloader(
@@ -460,15 +303,12 @@ def _run(
         poolsize=concurrency,
         logger=logger,
     )
-    # notifyHook = NotifyHook(app_name='epdownloader')
     try:
-        # pop_notification(app_id='epdownloader', title='執行中...')
         epDownloader.run()
-        # pop_notification(app_id='epdownloader', title='執行結束')
     except Exception as e:
         logger.exception(traceback.format_exc())
         logger.info('pop failure notification...')
-        pop_notification(
+        Toast.pop(
             app_id='epdownloader',
             title='不明執行失敗',
             link=log_path,
@@ -479,11 +319,59 @@ def _run(
     logger.info(f'=> {end - start} seconds')
 
 
-def main(args):
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+def main():
+    parser = argparse.ArgumentParser(
+        prog='epdownloader',
+        description="download latest or missing episodes",
+    )
 
-    # args = parser.parse_args()
+    parser.add_argument(
+        '--outputdir',
+        '-od',
+        required=True,
+        help='output directory, e.g. ~/Downloads/',
+    )
+    parser.add_argument(
+        '--tempdir',
+        required=True,
+        help='temp dir, used to store .ts files before combing them into mp4',
+    )
+    parser.add_argument(
+        '--config_path',
+        required=True,
+        help='custom config file path, e.g. ~/config.json',
+    )
+    parser.add_argument(
+        '--concurrency',
+        '-c',
+        metavar='N',
+        type=int,
+        default=7,
+        help='number of save ts file at a time',
+    )
+    parser.add_argument(
+        '--limit_conn',
+        '-conn',
+        type=int,
+        default=100,
+        help='limit amount of simultaneously opened connections',
+    )
+    parser.add_argument(
+        '--programlock',
+        '-lock',
+        action='store_true',
+        help=
+        "set to ensure that it can't be called again until the program is done",
+    )
+    parser.add_argument(
+        '--pop_notification',
+        '-pop',
+        action='store_true',
+        help=
+        "set to allow pop notifications (only support Windows 10 with PowerShell)",
+    )
+
+    args = parser.parse_args()
 
     tempdir = Path(args.tempdir).as_posix()
     os.makedirs(tempdir, exist_ok=True)
@@ -496,13 +384,13 @@ def main(args):
     concurrency = args.concurrency
     programlock = args.programlock
     limit_conn = args.limit_conn
-    # pop_notification = args.pop_notification
+    pop_notification = args.pop_notification
 
-    # if not os.path.exists(config_path):
-    #     raise FileExistsError
+    Toast.pop_status(pop_notification)
 
     loc_file_path = os.path.join(gettempdir(), 'epdownloader')
-    logger = setup_logger(log_path)
+    Log.setup_logger(log_path)
+    logger = Log.LOGGER
     if os.path.exists(loc_file_path):
         logger.info('Protected program is running')
         logger.info('Program exit')
@@ -521,6 +409,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    args = parser.parse_args()
-    POP_NOTIFICATION = args.pop_notification
-    main(args)
+    main()
