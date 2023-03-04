@@ -1,6 +1,6 @@
 import json
 import random
-from urllib.request import Request, urlopen
+import requests
 
 from bs4 import BeautifulSoup
 
@@ -19,13 +19,20 @@ class WebTools:
 
     def _getReqObj(self, url):
         ua = self.randomUserAgent()
-        request = Request(url, headers=ua)
+        request = requests.get(url, headers=ua)
         return request
 
     def getHtmlStr(self, url):
         req_obj = self._getReqObj(url)
-        html_str = urlopen(req_obj).read().decode()
+        html_str = req_obj.text
         return html_str
+
+    def getContent(self, url):
+        req_obj = self._getReqObj(url)
+        if req_obj.status_code == 200:
+            return req_obj.content
+        else:
+            return None
 
     def getBsFromUrl(self, url):
         html_str = self.getHtmlStr(url)

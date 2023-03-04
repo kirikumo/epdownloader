@@ -2,15 +2,17 @@ import json
 import logging
 import os
 import re
+import subprocess
 import time
 import traceback
 from datetime import datetime as dat
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 from selenium import webdriver
 from selenium.common.exceptions import JavascriptException
 from selenium.webdriver.common.by import By
-from aiom3u8downloader.aiodownloadm3u8 import AioM3u8Downloader
+from aiom3u8downloader.aiodownloadm3u8 import AioM3u8Downloader, IMG_SUFFIX_LIST
 from tool.epdownloader.epdownloader.base import VideoData, WebTools
 from tool.epdownloader.epdownloader.utils import Toast
 
@@ -25,8 +27,8 @@ class ShowQParser:
         logger: logging.Logger,
         limit_get_page_video,
         priority_host_list,
+        bad_host_list,
         limit_conn=100,
-        poolsize=5,
     ):
         self.outputdir = outputdir
         self.tempdir = tempdir
@@ -34,8 +36,8 @@ class ShowQParser:
         self.logger = logger
         self.limit_get_page_video = limit_get_page_video
         self.priority_host_list = priority_host_list
+        self.bad_host_list = bad_host_list
         self.limit_conn = limit_conn
-        self.poolsize = poolsize
 
         self.web_tools = WebTools()
 
@@ -44,6 +46,7 @@ class ShowQParser:
         title = video_data.title
         index = video_data.index
         m3u8url = video_data.m3u8url
+        self.logger.info(f'|> Download {title}#{index}.mp4 from {m3u8url}')
         save_folder_path = Path(
             os.path.join(
                 self.outputdir,
@@ -56,42 +59,96 @@ class ShowQParser:
             m3u8url,
             save_folder_path,
             tempdir=self.tempdir,
-            poolsize=self.poolsize,
+            # poolsize=self.poolsize,
             limit_conn=self.limit_conn,
             auto_rename=True,
         )
-        return downloader.start()
+        resultPath, success = downloader.start()
+        if not success:
+            return None, False
+        return resultPath, success
 
-    def get_vedio_info(self, browser: webdriver.Chrome):
+    def get_ts_resolution(self, m3u8_url, m3u8_text):
+        temp_ts_path = os.path.join(self.tempdir, 'tmp.ts')
+        pattern = re.compile(r'RESOLUTION=([0-9]+x[0-9]+)')
+        mo = pattern.search(m3u8_text)
+        if mo is not None:
+            resolution = mo.group(1)
+            return resolution, True
+
+        redirect_m3u8_url_list = []
+        for line in m3u8_text.split('\n'):
+            if line.startswith('#') or line.strip() == '':
+                continue
+            _url = urljoin(m3u8_url, line)
+            if line.endswith('.m3u8'):
+                redirect_m3u8_url_list.append(_url)
+                continue
+            try:
+                content = self.web_tools.getContent(urljoin(_url, line))
+                if content is None:
+                    return '0x0', False
+
+                with open(temp_ts_path, 'wb') as f:
+                    if any(map(line.lower().endswith, IMG_SUFFIX_LIST)):
+                        # image to ts
+                        content = content[212:]
+                        self.logger.info('Download temp ts from .img to .ts')
+                    f.write(content)
+                break
+            except Exception:
+                self.logger.info(f'Faile {_url}, {line}')
+        cmd = [
+            'ffprobe', '-v', 'error', '-select_streams', 'v', '-show_entries',
+            'stream=width,height', '-of', 'json', temp_ts_path
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE)
+        if proc.returncode == 0:
+            try:
+                stream = json.loads(proc.stdout)['streams'][0]
+                return f"{stream['width']}x{stream['height']}", True
+            except Exception:
+                pass
+        for redirect_m3u8_url in redirect_m3u8_url_list:
+            try:
+                redirect_m3u8_text = self.web_tools.getHtmlStr(
+                    redirect_m3u8_url)
+                resolution, status = self.get_ts_resolution(
+                    redirect_m3u8_url, redirect_m3u8_text)
+                if status:
+                    return resolution, True
+            except Exception:
+                self.logger.warning(traceback.format_exc())
+        return '0x0', False
+
+
+    def get_browser_m3u8url(self, browser: webdriver.Chrome):
         retry = 10
         for i in range(retry):
             try:
                 m3u8url = browser.execute_script('return m3u8url')
-
+                return m3u8url
             except JavascriptException:
-                if i + 1 == retry:
-                    self.logger.info('Failed return m3u8url')
-                    return '0x0', ''
+                if i + 1 != retry:
+                    self.logger.info(f'try: {i+1}')
+                    time.sleep(1)
 
-                self.logger.info(f'try: {i+1}')
-                time.sleep(1)
+        self.logger.info('Failed return m3u8url')
+        return ''
+
+    def get_vedio_info(self, m3u8url):
         try:
             self.logger.info(f'query m3u8: {m3u8url}')
             m3u8_text = self.web_tools.getHtmlStr(m3u8url)
 
-            pattern = re.compile(r'RESOLUTION=([0-9]+x[0-9]+)')
-            mo = pattern.search(m3u8_text)
-            if mo is None:
-                resolution = '1280x720'
-            else:
-                resolution = mo.group(1)
-            return resolution, m3u8url
+            resolution, _success = self.get_ts_resolution(m3u8url, m3u8_text)
+            return resolution
         except Exception as e:
             self.logger.info('--------------------------------')
             self.logger.info(f'e: {e}')
             self.logger.info(f'm3u8url: {m3u8url}')
             self.logger.info('--------------------------------')
-            return '0x0', m3u8url
+            return '0x0'
 
     def get_page_vedio_data_list(
         self,
@@ -121,8 +178,13 @@ class ShowQParser:
             )
 
             browser.switch_to.frame(bros_iframe)
-            resolution, m3u8url = self.get_vedio_info(browser)
+            m3u8url = self.get_browser_m3u8url(browser)
             browser.switch_to.parent_frame()
+
+            if any([badHost in m3u8url for badHost in self.bad_host_list]):
+                continue
+
+            resolution = self.get_vedio_info(m3u8url)
 
             _videoData = VideoData(title, index, resolution, m3u8url)
             video_data_list.append(_videoData)
@@ -146,12 +208,21 @@ class ShowQParser:
             title_list.append(text)
         return title_list
 
-    def find_best_video_data(self, video_data_list: list[VideoData]):
+    def sort_video_data_list(self, video_data_list: list[VideoData]):
+        priorityList = []
+        videoList = []
+        video_data_list = sorted(video_data_list, reverse=True)
+
+        for video_data in video_data_list:
+            if video_data.m3u8url not in self.priority_host_list:
+                videoList.append(video_data)
+
         for priority_host in self.priority_host_list:
             for video_data in video_data_list:
                 if priority_host in video_data.m3u8url:
-                    return video_data
-        return max(video_data_list)
+                    priorityList.append(video_data)
+                    break
+        return priorityList + videoList
 
     def parse(
         self,
@@ -185,10 +256,17 @@ class ShowQParser:
             yyyymmdd = missing_title.split()[-1]
             url = f'{ep_url}{yyyymmdd}.html'
             video_data_list = self.get_page_vedio_data_list(browser, url)
-            best_video_data = self.find_best_video_data(video_data_list)
+            sort_video_data_list = self.sort_video_data_list(video_data_list)
 
             try:
-                downloaded_path = self.download_m3u8(ep_name, best_video_data)
+                best_video_data = None
+                for video_data in sort_video_data_list:
+                    downloaded_path, success = self.download_m3u8(ep_name, video_data)
+                    if success:
+                        best_video_data = video_data
+                        break
+                if best_video_data is None:
+                    raise Exception('All videos cannot be downloaded')
                 downloaded_title_list.append(best_video_data.title)
                 self.logger.info('pop success notification...')
                 noti_kwargs = dict(

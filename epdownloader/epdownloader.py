@@ -12,6 +12,8 @@ from selenium.webdriver.chrome.service import Service
 from tool.epdownloader.epdownloader.base import WebTools
 from tool.epdownloader.epdownloader.showQ import ShowQParser
 from tool.epdownloader.epdownloader.utils import Log, Toast
+from selenium.webdriver.remote.errorhandler import SessionNotCreatedException
+from chromedriverupdate.chrome_driver import ChromeDriverUpdate
 
 
 class EPDownloader(WebTools):
@@ -24,14 +26,12 @@ class EPDownloader(WebTools):
         config_path,
         logger,
         limit_conn=100,
-        poolsize=7,
     ):
         self.outputdir = outputdir
         self.tempdir = tempdir
         self.log_path = log_path
         self.logger = logger
         self.limit_conn = limit_conn
-        self.poolsize = poolsize
 
         with open(config_path, encoding='utf-8') as f:
             config_dict = json.load(f)
@@ -39,6 +39,7 @@ class EPDownloader(WebTools):
         self.subscription_info: dict = config_dict['subscription_info']
         self.priority_host_list: list = config_dict['priority_host_list']
         self.limit_get_page_video: int = config_dict['limit_get_page_video']
+        self.bad_host_list: list = config_dict['bad_host_list']
         self.cache_file_path: str = Path(
             config_dict['cache_file_path']).as_posix()
         self.chromedriver_path = Path(
@@ -61,7 +62,7 @@ class EPDownloader(WebTools):
             log_path=self.log_path,
             logger=self.logger,
             limit_conn=self.limit_conn,
-            poolsize=self.poolsize,
+            bad_host_list=self.bad_host_list,
             limit_get_page_video=self.limit_get_page_video,
             priority_host_list=self.priority_host_list,
         )
@@ -90,10 +91,18 @@ class EPDownloader(WebTools):
         options.add_argument("--start-maximized")
         options.add_argument("--log-level=3")
 
-        browser = webdriver.Chrome(
-            service=Service(executable_path=self.chromedriver_path),
-            options=options,
-        )
+        try:
+            browser = webdriver.Chrome(
+                service=Service(executable_path=self.chromedriver_path),
+                options=options,
+            )
+        except SessionNotCreatedException as e:
+            self.logger.info('=> Update chrome driver...')
+            ChromeDriverUpdate(e.msg, 'D:\\Hin\\python').update()
+            browser = webdriver.Chrome(
+                service=Service(executable_path=self.chromedriver_path),
+                options=options,
+            )
         for subscription_url in self.subscription_info.keys():
             self.logger.info(
                 '===================================================')
@@ -109,7 +118,6 @@ def _run(
     log_path,
     tempdir,
     outputdir,
-    concurrency,
     limit_conn,
     config_path,
     logger: Log.LOGGER,
@@ -121,7 +129,6 @@ def _run(
         log_path=log_path,
         config_path=config_path,
         limit_conn=limit_conn,
-        poolsize=concurrency,
         logger=logger,
     )
     try:
@@ -162,14 +169,14 @@ def main():
         required=True,
         help='custom config file path, e.g. ~/config.json',
     )
-    parser.add_argument(
-        '--concurrency',
-        '-c',
-        metavar='N',
-        type=int,
-        default=7,
-        help='number of save ts file at a time',
-    )
+    # parser.add_argument(
+    #     '--concurrency',
+    #     '-c',
+    #     metavar='N',
+    #     type=int,
+    #     default=7,
+    #     help='number of save ts file at a time',
+    # )
     parser.add_argument(
         '--limit_conn',
         '-conn',
@@ -202,7 +209,7 @@ def main():
     )
     outputdir = Path(args.outputdir).as_posix()
     config_path = args.config_path
-    concurrency = args.concurrency
+    # concurrency = args.concurrency
     programlock = args.programlock
     limit_conn = args.limit_conn
     pop_notification = args.pop_notification
@@ -221,10 +228,10 @@ def main():
     if programlock:
         with NamedTemporaryFile() as tf:
             os.rename(tf.name, loc_file_path)
-            _run(log_path, tempdir, outputdir, concurrency, limit_conn,
+            _run(log_path, tempdir, outputdir, limit_conn,
                  config_path, logger)
     else:
-        _run(log_path, tempdir, outputdir, concurrency, limit_conn,
+        _run(log_path, tempdir, outputdir, limit_conn,
              config_path, logger)
     logger.info('----------------------- END -----------------------')
 
