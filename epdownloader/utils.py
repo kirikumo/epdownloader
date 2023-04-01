@@ -3,8 +3,7 @@ import os
 import threading
 
 from winotify import Notification, audio
-from aiom3u8downloader.aiodownloadm3u8 import load_logger_config
-
+from aiom3u8downloader.configlogger import load_logger_config
 
 class Log:
     LOGGER: logging.Logger = None
